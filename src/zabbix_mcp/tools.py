@@ -71,6 +71,52 @@ TOOLS: List[Tool] = [
             "required": ["hostname", "template_name"],
         },
     ),
+    Tool(
+        name="create_user",
+        description="Create a new Zabbix user with specified role",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "username": {"type": "string", "description": "Unique username"},
+                "password": {"type": "string", "description": "User password"},
+                "role": {"type": "string", "description": "Role name (default: Super admin role)"},
+                "email": {"type": "string", "description": "Optional email address"},
+                "name": {"type": "string", "description": "Optional first name"},
+                "surname": {"type": "string", "description": "Optional last name"},
+            },
+            "required": ["username", "password"],
+        },
+    ),
+    Tool(
+        name="update_user",
+        description="Update user properties (password, role, etc.)",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "userid": {"type": "string", "description": "User ID"},
+                "password": {"type": "string", "description": "New password"},
+                "current_password": {"type": "string", "description": "Current password (required if changing password)"},
+                "roleid": {"type": "string", "description": "New role ID"},
+            },
+            "required": ["userid"],
+        },
+    ),
+    Tool(
+        name="get_roles",
+        description="List all available Zabbix roles",
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    Tool(
+        name="check_host_interface_availability",
+        description="Check if host interface (agent) is available",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "hostid": {"type": "string", "description": "Host ID"},
+            },
+            "required": ["hostid"],
+        },
+    ),
 ]
 
 
@@ -294,6 +340,108 @@ def handle_link_template(client: ZabbixClient, args: Dict[str, Any]) -> str:
         return f"❌ Error: {e}"
 
 
+def handle_create_user(client: ZabbixClient, args: Dict[str, Any]) -> str:
+    """Handle create_user tool."""
+    try:
+        from .user_management import UserManagement
+        
+        um = UserManagement(client)
+        result = um.create_user(
+            username=args.get("username"),
+            password=args.get("password"),
+            role=args.get("role", "Super admin role"),
+            email=args.get("email"),
+            name=args.get("name"),
+            surname=args.get("surname")
+        )
+        
+        if result["success"]:
+            return f"✅ User created successfully\nUser ID: {result['userid']}\nUsername: {args.get('username')}"
+        else:
+            errors = "\n".join(result.get("validation_errors", []))
+            return f"❌ Failed to create user\n{result['message']}\n{errors}"
+    except Exception as e:
+        return f"Error: {e}"
+
+
+def handle_update_user(client: ZabbixClient, args: Dict[str, Any]) -> str:
+    """Handle update_user tool."""
+    try:
+        from .user_management import UserManagement
+        
+        um = UserManagement(client)
+        result = um.update_user(
+            userid=args.get("userid"),
+            password=args.get("password"),
+            roleid=args.get("roleid"),
+            current_password=args.get("current_password"),
+            email=args.get("email"),
+            name=args.get("name"),
+            surname=args.get("surname")
+        )
+        
+        if result["success"]:
+            changes = ", ".join(result.get("changes_made", []))
+            return f"✅ User updated successfully\nChanges: {changes}"
+        else:
+            return f"❌ {result['message']}"
+    except Exception as e:
+        return f"Error: {e}"
+
+
+def handle_get_roles(client: ZabbixClient, args: Dict[str, Any]) -> str:
+    """Handle get_roles tool."""
+    try:
+        from .user_management import UserManagement
+        
+        um = UserManagement(client)
+        result = um.get_roles()
+        
+        if result["roles"]:
+            output = f"📋 Available Roles ({result['total']}):\n\n"
+            for role in result["roles"]:
+                role_type = role.get("type", "unknown")
+                output += f"• {role['name']} (ID: {role['roleid']}) - Type: {role_type}\n"
+            return output
+        else:
+            return "No roles found"
+    except Exception as e:
+        return f"Error: {e}"
+
+
+def handle_check_host_interface_availability(client: ZabbixClient, args: Dict[str, Any]) -> str:
+    """Handle check_host_interface_availability tool."""
+    try:
+        from .user_management import UserManagement
+        
+        um = UserManagement(client)
+        result = um.check_host_interface_availability(args.get("hostid"))
+        
+        status_emoji = {
+            "available": "✅",
+            "checking": "🔄",
+            "unavailable": "❌",
+            "unknown": "❓"
+        }
+        
+        emoji = status_emoji.get(result["status"], "❓")
+        output = f"{emoji} Host Interface Status\n"
+        output += f"Host: {result.get('host', 'Unknown')}\n"
+        output += f"Status: {result['status'].upper()}\n"
+        
+        if result["interfaces"]:
+            output += f"Interfaces:\n"
+            for iface in result["interfaces"]:
+                output += f"  • {iface.get('ip')}:{iface.get('port')}\n"
+        
+        if result.get("error"):
+            output += f"Error: {result['error']}"
+        
+        return output
+    except Exception as e:
+        return f"Error: {e}"
+
+
 # Tool handler registry
 TOOL_HANDLERS: Dict[str, Callable[[ZabbixClient, Dict[str, Any]], str]] = {
     "get_hosts": handle_get_hosts,
@@ -306,6 +454,10 @@ TOOL_HANDLERS: Dict[str, Callable[[ZabbixClient, Dict[str, Any]], str]] = {
     "get_system_status": handle_get_system_status,
     "get_templates": handle_get_templates,
     "link_template": handle_link_template,
+    "create_user": handle_create_user,
+    "update_user": handle_update_user,
+    "get_roles": handle_get_roles,
+    "check_host_interface_availability": handle_check_host_interface_availability,
 }
 
 
