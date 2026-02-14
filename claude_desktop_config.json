@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "zabbix-mcp": {
+      "command": "python",
+      "args": ["-m", "zabbix_mcp.server"],
+      "env": {
+        "PYTHONPATH": "/home/openclaw_user/.openclaw/workspace/zabbix-mcp/src",
+        "ZABBIX_HOST": "zabbix.instanceone.co",
+        "ZABBIX_USERNAME": "Admin",
+        "ZABBIX_PASSWORD": "zabbix",
+        "ZABBIX_PORT": "443",
+        "ZABBIX_HTTPS": "true",
+        "ZABBIX_VERIFY_SSL": "true"
+      },
+      "cwd": "/home/openclaw_user/.openclaw/workspace/zabbix-mcp"
+    }
+  }
+}
