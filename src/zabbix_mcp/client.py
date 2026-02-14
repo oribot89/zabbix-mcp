@@ -145,6 +145,7 @@ class ZabbixClient:
             "output": "extend",
             "filter": {"host": hostname},
             "selectInterfaces": "extend",
+            "selectParentTemplates": "extend",
         })
         return hosts[0] if hosts else None
     
@@ -224,3 +225,87 @@ class ZabbixClient:
         }
         params.update(kwargs)
         return self.call("hostgroup.get", params)
+    
+    def get_templates(self, **kwargs) -> List[Dict[str, Any]]:
+        """Get all templates."""
+        params = {
+            "output": "extend",
+        }
+        params.update(kwargs)
+        return self.call("template.get", params)
+    
+    def get_template_by_name(self, template_name: str) -> Optional[Dict[str, Any]]:
+        """Get template by name."""
+        templates = self.call("template.get", {
+            "output": "extend",
+            "filter": {"host": template_name},
+        })
+        return templates[0] if templates else None
+    
+    def link_template(self, hostid: str, templateid: str) -> bool:
+        """
+        Link a template to a host (appends to existing templates).
+        
+        Args:
+            hostid: Host ID
+            templateid: Template ID
+            
+        Returns:
+            True if successful
+        """
+        try:
+            # Get existing templates
+            host = self.call("host.get", {
+                "output": "extend",
+                "hostids": hostid,
+                "selectParentTemplates": "extend",
+            })
+            
+            if not host:
+                raise ZabbixAPIError(f"Host with ID {hostid} not found")
+            
+            # Build template list with existing templates + new template
+            existing_templates = [
+                {"templateid": t["templateid"]}
+                for t in host[0].get("parentTemplates", [])
+            ]
+            
+            # Check if template already linked
+            template_ids = [t["templateid"] for t in existing_templates]
+            if templateid in template_ids:
+                logger.warning(f"Template {templateid} already linked to host {hostid}")
+                return True
+            
+            # Add new template
+            existing_templates.append({"templateid": templateid})
+            
+            # Update host with all templates
+            result = self.call("host.update", {
+                "hostid": hostid,
+                "templates": existing_templates,
+            })
+            return bool(result)
+        except ZabbixAPIError as e:
+            logger.error(f"Failed to link template: {e}")
+            return False
+    
+    def link_template_by_names(self, hostname: str, template_name: str) -> bool:
+        """
+        Link a template to a host by names (appends to existing).
+        
+        Args:
+            hostname: Host name
+            template_name: Template name
+            
+        Returns:
+            True if successful
+        """
+        host = self.get_host_by_name(hostname)
+        if not host:
+            raise ZabbixAPIError(f"Host '{hostname}' not found")
+        
+        template = self.get_template_by_name(template_name)
+        if not template:
+            raise ZabbixAPIError(f"Template '{template_name}' not found")
+        
+        return self.link_template(host["hostid"], template["templateid"])

@@ -54,6 +54,23 @@ TOOLS: List[Tool] = [
         description="Get overall system status and statistics",
         inputSchema={"type": "object", "properties": {}},
     ),
+    Tool(
+        name="get_templates",
+        description="List all available templates",
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    Tool(
+        name="link_template",
+        description="Link a template to a host by names (hostname and template name)",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "hostname": {"type": "string", "description": "Host name"},
+                "template_name": {"type": "string", "description": "Template name"},
+            },
+            "required": ["hostname", "template_name"],
+        },
+    ),
 ]
 
 
@@ -238,6 +255,45 @@ def handle_get_system_status(client: ZabbixClient, args: Dict[str, Any]) -> str:
         return f"Error: {e}"
 
 
+def handle_get_templates(client: ZabbixClient, args: Dict[str, Any]) -> str:
+    """Handle get_templates tool."""
+    try:
+        templates = client.get_templates()
+        
+        if not templates:
+            return "No templates found"
+        
+        result = f"📋 Available Templates: {len(templates)}\n\n"
+        for template in templates[:20]:
+            result += f"• {template.get('name')} ({template.get('host')})\n"
+        
+        if len(templates) > 20:
+            result += f"\n... and {len(templates) - 20} more templates"
+        
+        return result
+    except Exception as e:
+        return f"Error: {e}"
+
+
+def handle_link_template(client: ZabbixClient, args: Dict[str, Any]) -> str:
+    """Handle link_template tool."""
+    try:
+        hostname = args.get("hostname")
+        template_name = args.get("template_name")
+        
+        if not hostname or not template_name:
+            return "Error: hostname and template_name are required"
+        
+        success = client.link_template_by_names(hostname, template_name)
+        
+        if success:
+            return f"✅ Successfully linked template '{template_name}' to host '{hostname}'"
+        else:
+            return f"❌ Failed to link template '{template_name}' to host '{hostname}'"
+    except Exception as e:
+        return f"❌ Error: {e}"
+
+
 # Tool handler registry
 TOOL_HANDLERS: Dict[str, Callable[[ZabbixClient, Dict[str, Any]], str]] = {
     "get_hosts": handle_get_hosts,
@@ -248,6 +304,8 @@ TOOL_HANDLERS: Dict[str, Callable[[ZabbixClient, Dict[str, Any]], str]] = {
     "get_items": handle_get_items,
     "get_host_groups": handle_get_host_groups,
     "get_system_status": handle_get_system_status,
+    "get_templates": handle_get_templates,
+    "link_template": handle_link_template,
 }
 
 
