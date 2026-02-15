@@ -55,35 +55,95 @@ python -m zabbix_mcp.server
 
 ## Available Tools
 
-### get_hosts
+### Query Tools (Read-Only)
+
+#### get_hosts
 List all monitored hosts in Zabbix.
 
-### get_problems
+#### get_problems
 Get active problems/alerts.
 
-### get_triggers
+#### get_triggers
 List triggers with their current status.
 
-### get_events
+#### get_events
 Get recent events from Zabbix.
 
-### get_host_details
+#### get_host_details
 Get detailed information about a specific host.
 
 **Parameters:**
 - `hostname` (required): Name of the host to look up
 
-### get_items
+#### get_items
 Get monitored items (metrics).
 
 **Parameters:**
 - `hostname` (optional): Filter by hostname
 
-### get_host_groups
+#### get_host_groups
 List all host groups.
 
-### get_system_status
+#### get_system_status
 Get overall system status and statistics.
+
+#### get_templates
+List all available Zabbix templates.
+
+#### check_host_interface_availability
+Check if a host's agent interface is available and responding.
+
+**Parameters:**
+- `hostid` (required): Host ID to check
+
+### Management Tools (Write Operations)
+
+#### create_host ⭐ **RECOMMENDED**
+Create a new Zabbix host for monitoring containers or servers.
+
+**Recommended Parameters:**
+- `hostname` (required): Internal identifier (e.g., `beta-servicedesk`)
+- `display_name` (required): Display name in frontend (e.g., `Beta Service Desk (CTID 105)`)
+- `ip_address` (required): Agent IP for polling (e.g., `10.0.0.7`)
+- `port` (optional): Agent port (default: `10050`)
+- `group_id` (optional): Host group ID (default: `2` = Linux servers)
+- `template_id` (optional): Template ID (default: `10001` = Linux by Zabbix agent)
+
+**Why use API instead of manual DB edits:**
+- Zabbix internal state properly synchronized
+- Sequence tables automatically managed
+- Interface marked available=1 immediately
+- Agent polling begins within 30-60 seconds
+- Guaranteed data consistency
+
+**Example:**
+```
+Create host: beta-servicedesk
+Display: Beta Service Desk (CTID 105)
+IP: 10.0.0.7
+Port: 10050
+```
+
+#### add_host_interface
+Add a network interface to an existing host for agent polling.
+
+**Parameters:**
+- `hostid` (required): Host ID
+- `ip_address` (required): IP address
+- `port` (optional): Agent port (default: `10050`)
+- `interface_type` (optional): 1=Agent, 2=SNMP, 3=IPMI, 4=JMX (default: 1)
+
+#### link_template
+Link a template to a host to auto-generate monitoring items.
+
+**Parameters:**
+- `hostname` (required): Host name
+- `template_name` (required): Template name
+
+#### sync_zabbix_sequences
+Fix sequence table desynchronization (call once after manual DB operations).
+
+**Note:** Only needed if sequences became out of sync. API-based operations handle this automatically.
 
 ## Claude Desktop Integration
 

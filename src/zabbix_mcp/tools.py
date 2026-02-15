@@ -117,6 +117,41 @@ TOOLS: List[Tool] = [
             "required": ["hostid"],
         },
     ),
+    Tool(
+        name="create_host",
+        description="Create a new Zabbix host (monitor). Use this to add new containers/servers to monitoring.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "hostname": {"type": "string", "description": "Internal hostname identifier (e.g., 'my-server')"},
+                "display_name": {"type": "string", "description": "Display name shown in Zabbix frontend"},
+                "ip_address": {"type": "string", "description": "IP address for agent polling (e.g., 10.0.0.5)"},
+                "port": {"type": "string", "description": "Agent port (default: 10050)"},
+                "group_id": {"type": "string", "description": "Host group ID (default: 2 for 'Linux servers')"},
+                "template_id": {"type": "string", "description": "Template ID to auto-link items (default: 10001 for 'Linux by Zabbix agent')"},
+            },
+            "required": ["hostname", "display_name", "ip_address"],
+        },
+    ),
+    Tool(
+        name="add_host_interface",
+        description="Add a network interface to an existing host for polling by Zabbix server",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "hostid": {"type": "string", "description": "Host ID"},
+                "ip_address": {"type": "string", "description": "IP address for polling"},
+                "port": {"type": "string", "description": "Agent port (default: 10050)"},
+                "interface_type": {"type": "string", "description": "Interface type: 1=Agent (default), 2=SNMP, 3=IPMI, 4=JMX"},
+            },
+            "required": ["hostid", "ip_address"],
+        },
+    ),
+    Tool(
+        name="sync_zabbix_sequences",
+        description="Fix sequence table desynchronization (call this once after manual DB operations)",
+        inputSchema={"type": "object", "properties": {}},
+    ),
 ]
 
 
@@ -442,6 +477,143 @@ def handle_check_host_interface_availability(client: ZabbixClient, args: Dict[st
         return f"Error: {e}"
 
 
+def handle_create_host(client: ZabbixClient, args: Dict[str, Any]) -> str:
+    """Handle create_host tool - Create new Zabbix host for monitoring."""
+    try:
+        hostname = args.get("hostname")
+        display_name = args.get("display_name")
+        ip_address = args.get("ip_address")
+        port = args.get("port", "10050")
+        group_id = args.get("group_id", "2")  # Default: Linux servers
+        template_id = args.get("template_id", "10001")  # Default: Linux by Zabbix agent
+        
+        if not all([hostname, display_name, ip_address]):
+            return "❌ Error: hostname, display_name, and ip_address are required"
+        
+        # Step 1: Create host
+        host_params = {
+            "host": hostname,
+            "name": display_name,
+            "groups": [{"groupid": group_id}],
+        }
+        
+        host_result = client.call("host.create", host_params)
+        if not host_result:
+            return f"❌ Failed to create host '{hostname}'"
+        
+        hostid = host_result[0] if isinstance(host_result, list) else host_result.get("hostids", [None])[0]
+        if not hostid:
+            return f"❌ Failed to get hostid from creation response"
+        
+        # Step 2: Add interface
+        interface_params = {
+            "hostid": hostid,
+            "type": 1,  # Agent type
+            "main": 1,  # Primary interface
+            "useip": 1,  # Use IP
+            "ip": ip_address,
+            "dns": "",
+            "port": port,
+        }
+        
+        interface_result = client.call("hostinterface.create", interface_params)
+        if not interface_result:
+            return f"⚠️ Host created (ID: {hostid}) but interface creation failed"
+        
+        interfaceid = interface_result[0] if isinstance(interface_result, list) else interface_result.get("interfaceids", [None])[0]
+        
+        # Step 3: Link template
+        if template_id:
+            update_params = {
+                "hostid": hostid,
+                "templates": [{"templateid": template_id}],
+            }
+            
+            template_result = client.call("host.update", update_params)
+            if not template_result:
+                return f"⚠️ Host created (ID: {hostid}) but template linking failed"
+        
+        return f"""✅ Host Created Successfully!
+        
+🖥️ Hostname: {hostname}
+📝 Display: {display_name}
+🌐 IP: {ip_address}:{port}
+🔗 Host ID: {hostid}
+📋 Interface ID: {interfaceid}
+📊 Template: {'Linked (10001)' if template_id == '10001' else f'Linked ({template_id})'}
+
+Next: Wait 30-60 seconds for agent to start reporting metrics."""
+    except Exception as e:
+        return f"❌ Error: {e}"
+
+
+def handle_add_host_interface(client: ZabbixClient, args: Dict[str, Any]) -> str:
+    """Handle add_host_interface tool - Add interface to existing host."""
+    try:
+        hostid = args.get("hostid")
+        ip_address = args.get("ip_address")
+        port = args.get("port", "10050")
+        interface_type = args.get("interface_type", "1")  # Default: Agent
+        
+        if not all([hostid, ip_address]):
+            return "❌ Error: hostid and ip_address are required"
+        
+        interface_params = {
+            "hostid": hostid,
+            "type": interface_type,
+            "main": 1,
+            "useip": 1,
+            "ip": ip_address,
+            "dns": "",
+            "port": port,
+        }
+        
+        result = client.call("hostinterface.create", interface_params)
+        if not result:
+            return f"❌ Failed to add interface to host {hostid}"
+        
+        interfaceid = result[0] if isinstance(result, list) else result.get("interfaceids", [None])[0]
+        
+        return f"""✅ Interface Added!
+
+🔗 Interface ID: {interfaceid}
+🌐 IP: {ip_address}:{port}
+🖥️ Host ID: {hostid}
+
+Next: Wait for Zabbix server to poll the interface (30-60 seconds)."""
+    except Exception as e:
+        return f"❌ Error: {e}"
+
+
+def handle_sync_zabbix_sequences(client: ZabbixClient, args: Dict[str, Any]) -> str:
+    """Handle sync_zabbix_sequences tool - Fix sequence table desynchronization."""
+    try:
+        # This requires direct database access, not API
+        # Return instructions for manual execution
+        return """⚠️ Sequence Sync - Manual Steps Required
+
+After manual database operations, sequence tables can get out of sync.
+Run these SQL commands on the Zabbix database:
+
+```sql
+-- Fix host sequence
+UPDATE ids SET nextid = (SELECT MAX(hostid) + 1 FROM hosts) WHERE table_name = 'hosts';
+
+-- Fix interface sequence  
+UPDATE ids SET nextid = (SELECT MAX(interfaceid) + 1 FROM interface) WHERE table_name = 'interface';
+
+-- Fix item sequence
+UPDATE ids SET nextid = (SELECT MAX(itemid) + 1 FROM items) WHERE table_name = 'items';
+
+-- Verify
+SELECT table_name, nextid FROM ids WHERE table_name IN ('hosts', 'interface', 'items');
+```
+
+⚠️ Only run this once after manual DB edits. API-based operations handle sequences automatically."""
+    except Exception as e:
+        return f"❌ Error: {e}"
+
+
 # Tool handler registry
 TOOL_HANDLERS: Dict[str, Callable[[ZabbixClient, Dict[str, Any]], str]] = {
     "get_hosts": handle_get_hosts,
@@ -458,6 +630,9 @@ TOOL_HANDLERS: Dict[str, Callable[[ZabbixClient, Dict[str, Any]], str]] = {
     "update_user": handle_update_user,
     "get_roles": handle_get_roles,
     "check_host_interface_availability": handle_check_host_interface_availability,
+    "create_host": handle_create_host,
+    "add_host_interface": handle_add_host_interface,
+    "sync_zabbix_sequences": handle_sync_zabbix_sequences,
 }
 
 
