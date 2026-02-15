@@ -50,3 +50,14 @@ htmlcov/
 # Logging
 *.log
 zabbix_mcp.log
+
+# Sensitive files (never commit)
+.env
+.env.*
+*.local
+MEMORY.md
+private/
+secrets/
+*.key
+*.pem
+claude_desktop_config.json
