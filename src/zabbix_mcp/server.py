@@ -1,107 +1,76 @@
 """Zabbix MCP Server - Main MCP implementation."""
 
 import logging
+import os
 from typing import Any
 
 from mcp.server import Server
-from mcp.types import Tool, TextContent, ToolResult
+from mcp.server.stdio import stdio_server
+from mcp.types import Tool, TextContent
 
-from .config import load_config, ZabbixConfig
+from .config import load_config
 from .client import ZabbixClient, ZabbixAPIError
 from .tools import TOOLS, get_tool_handler
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+server = Server("zabbix-mcp")
+client: ZabbixClient | None = None
 
-class ZabbixMCPServer:
-    """Zabbix MCP Server implementation."""
-    
-    def __init__(self):
-        """Initialize the MCP server."""
-        self.server = Server("zabbix-mcp")
-        self.config: ZabbixConfig | None = None
-        self.client: ZabbixClient | None = None
-        
-        self.server.list_tools(self.list_tools)
-        self.server.call_tool(self.handle_tool_call)
-    
-    def initialize(self) -> None:
-        """Initialize configuration and authentication."""
-        try:
-            self.config = load_config()
-            logger.info(f"Loaded config: {self.config.host}:{self.config.port}")
-            
-            self.client = ZabbixClient(
-                base_url=self.config.base_url,
-                username=self.config.username,
-                password=self.config.password,
-                verify_ssl=self.config.verify_ssl,
-            )
 
-            import os
-            api_token = os.getenv("ZABBIX_API_TOKEN")
-            if api_token:
-                self.client.token = api_token
-                logger.info("Using ZABBIX_API_TOKEN directly")
-            else:
-                self.client.authenticate()
-                logger.info("Successfully authenticated with Zabbix")
-            
-        except Exception as e:
-            logger.error(f"Initialization error: {e}")
-            raise
-    
-    def list_tools(self) -> list[Tool]:
-        """List available tools."""
-        return TOOLS
-    
-    async def handle_tool_call(self, name: str, arguments: dict[str, Any]) -> ToolResult:
-        """Handle tool calls from MCP clients."""
-        try:
-            if not self.client:
-                return ToolResult(
-                    content=[TextContent(type="text", text="Error: Zabbix client not initialized")],
-                    is_error=True,
-                )
-            
-            handler = get_tool_handler(name)
-            if not handler:
-                return ToolResult(
-                    content=[TextContent(type="text", text=f"Unknown tool: {name}")],
-                    is_error=True,
-                )
-            
-            result = handler(self.client, arguments)
-            
-            return ToolResult(
-                content=[TextContent(type="text", text=result)],
-                is_error=False,
-            )
-            
-        except ZabbixAPIError as e:
-            logger.error(f"Zabbix API error: {e}")
-            return ToolResult(
-                content=[TextContent(type="text", text=f"Zabbix API error: {e}")],
-                is_error=True,
-            )
-        except Exception as e:
-            logger.error(f"Tool error: {e}")
-            return ToolResult(
-                content=[TextContent(type="text", text=f"Error: {e}")],
-                is_error=True,
-            )
-    
-    def run(self) -> None:
-        """Run the MCP server."""
-        self.initialize()
-        self.server.run()
+def get_client() -> ZabbixClient:
+    global client
+    if client is None:
+        raise RuntimeError("Zabbix client not initialized")
+    return client
+
+
+@server.list_tools()
+async def list_tools() -> list[Tool]:
+    return TOOLS
+
+
+@server.call_tool()
+async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
+    zc = get_client()
+    try:
+        handler = get_tool_handler(name)
+        result = handler(zc, arguments)
+        return [TextContent(type="text", text=str(result))]
+    except ZabbixAPIError as e:
+        return [TextContent(type="text", text=f"Zabbix API error: {e}")]
+    except Exception as e:
+        return [TextContent(type="text", text=f"Error: {e}")]
+
+
+async def main_async():
+    global client
+    config = load_config()
+    logger.info(f"Loaded config: {config.host}:{config.port}")
+
+    client = ZabbixClient(
+        base_url=config.base_url,
+        username=config.username,
+        password=config.password,
+        verify_ssl=config.verify_ssl,
+    )
+
+    api_token = os.getenv("ZABBIX_API_TOKEN")
+    if api_token:
+        client.token = api_token
+        logger.info("Using ZABBIX_API_TOKEN directly")
+    else:
+        client.authenticate()
+        logger.info("Authenticated with Zabbix")
+
+    async with stdio_server() as (read_stream, write_stream):
+        await server.run(read_stream, write_stream, server.create_initialization_options())
 
 
 def main():
-    """Entry point."""
-    mcp_server = ZabbixMCPServer()
-    mcp_server.run()
+    import asyncio
+    asyncio.run(main_async())
 
 
 if __name__ == "__main__":
