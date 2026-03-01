@@ -38,9 +38,15 @@ class ZabbixMCPServer:
                 password=self.config.password,
                 verify_ssl=self.config.verify_ssl,
             )
-            
-            self.client.authenticate()
-            logger.info("Successfully authenticated with Zabbix")
+
+            import os
+            api_token = os.getenv("ZABBIX_API_TOKEN")
+            if api_token:
+                self.client.token = api_token
+                logger.info("Using ZABBIX_API_TOKEN directly")
+            else:
+                self.client.authenticate()
+                logger.info("Successfully authenticated with Zabbix")
             
         except Exception as e:
             logger.error(f"Initialization error: {e}")
